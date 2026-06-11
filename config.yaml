@@ -1,0 +1,125 @@
+# =============================================================================
+# Market Sentiment Engine - Configuration
+# =============================================================================
+# Every threshold the creator's framework left vague ("for a long time",
+# "rapidly widening", "surging", "staying high") is pinned to a number here.
+# Tune these without touching code. All credit spreads are in BASIS POINTS.
+# =============================================================================
+
+# How much price history to pull (calendar range passed to data sources).
+data:
+  range: "2y"            # enough for 252-day rolling windows + 125d MA
+  request_timeout_s: 20
+  retries: 3
+  cache_minutes: 60      # reuse on-disk cache within this window (0 = disable)
+
+# -----------------------------------------------------------------------------
+# VIX (metric 1)
+# -----------------------------------------------------------------------------
+vix:
+  calm_low: 12           # 12-15 genuinely complacent (split out from "calm")
+  calm_high: 18          # below long-run average (~19-20) but not alarming
+  tense_low: 25          # scale-in territory begins
+  panic_low: 30          # heavy panic
+  extreme_low: 35        # extreme panic (S3 strong-buy threshold)
+  blowoff: 40            # historic crisis prints (2008 ~80, 2020 ~82)
+  ma_window: 50          # VIX vs its own 50d MA for the F&G volatility component
+  # Confirmation: VIX must hold >= a trigger for this many consecutive closes
+  # before it counts. Defeats 1-day spikes like Feb-2018 "Volmageddon" (37 -> 15).
+  confirmation_days: 3
+
+# -----------------------------------------------------------------------------
+# CNN Fear & Greed - reconstructed from components, scored 0-100 (0=fear)
+# -----------------------------------------------------------------------------
+fear_greed:
+  extreme_fear_max: 25   # S2 panic requires F&G below this
+  extreme_panic_fg_max: 15  # S3 extreme panic requires deeper fear (creator: 0-15)
+  fear_max: 45
+  neutral_max: 55
+  greed_max: 75          # >75 = extreme greed
+  norm_window: 252       # trailing window for min-max normalisation of components
+  # "for a long time" -> sustained this many trading days for the S5 sell lean
+  sustained_days: 20
+  # Equal-weight average over whatever components could be sourced this run.
+  # Default = 4 of CNN's 7 inputs (the ones with a reliable KEYLESS source).
+  # strength/putcall need a paid/scraped feed; enable only if you wire one up.
+  components:
+    momentum: true       # SPY vs 125d MA          (Yahoo)        [on]
+    volatility: true     # VIX vs 50d MA            (Yahoo)        [on]
+    safe_haven: true     # SPY vs IEF 20d return    (Yahoo)        [on]
+    junk_demand: true    # HY OAS vs IG OAS         (FRED)         [on]
+    strength: false      # NYSE 52wk highs - lows   (no keyless source) [off]
+    putcall: false       # CBOE total put/call      (no keyless source) [off]
+
+# -----------------------------------------------------------------------------
+# Market breadth (metric 3) - coarse ETF-ratio proxies + optional NYSE H/L
+# -----------------------------------------------------------------------------
+breadth:
+  ratio_window: 20       # lookback (trading days) for RSP/SPY & IWM/SPY trend
+  # Underperformance flagged only if the ratio falls more than this over window.
+  divergence_pct: 1.5    # e.g. RSP/SPY down >1.5% over 20d = narrowing leadership
+
+# -----------------------------------------------------------------------------
+# Credit market (metric 4) - THE MASTER GATE. OAS is primary, ETFs secondary.
+# All values in basis points (FRED reports percent; loader multiplies by 100).
+# -----------------------------------------------------------------------------
+credit:
+  benign_max: 400        # < 400  -> normal pullback, buy-side gate OPEN
+  elevated_max: 600      # 400-600 -> elevated, mild caution
+  # 600 .. systemic_min -> STRESS band (gate open, circuit-breaker watch)
+  # >= systemic_min OR rapid widening -> SYSTEMIC: hard buy lockout (S4).
+  # Raise systemic_min above 600 to widen the stress band (e.g. 1000).
+  systemic_min: 900
+  # "rapidly widening": OAS change over the window exceeds this many bps
+  rapid_widen_bps: 150
+  rapid_widen_days: 30
+  etf_crash_pct: 5.0     # HYG/JNK secondary glance: % drop over rapid_widen_days
+
+# -----------------------------------------------------------------------------
+# Cross-asset (metric 5) - regime detection + confirmation, not standalone
+# -----------------------------------------------------------------------------
+cross_asset:
+  move_window: 20        # trading days for yield / DXY / gold trend direction
+  # Real-yield (DFII10) rise over regime_window -> inflation/rates regime (A):
+  # positive stock-bond correlation, ETF-price credit signal is contaminated.
+  regime_window: 60
+  real_yield_rise_bps: 25   # real yield up > this over regime_window => regime A
+  dxy_surge_pct: 3.0        # DXY up > this over move_window = "surging"
+  yield_move_bps: 20        # 10Y move > this over move_window = "rising/falling"
+
+# -----------------------------------------------------------------------------
+# Index drawdown (S1 vs S2) - measured from trailing high
+# -----------------------------------------------------------------------------
+drawdown:
+  index_symbol: "SPY"
+  high_window: 252       # trailing high to measure the drawdown from
+  normal_low: 3.0        # S1 normal pullback band (%)
+  normal_high: 5.0
+  panic_min: 7.0         # S2 panic requires >= this drawdown (%)
+
+# -----------------------------------------------------------------------------
+# Stop-loss / circuit breaker - the missing dimension (anti-2008-falling-knife)
+# -----------------------------------------------------------------------------
+circuit_breaker:
+  enabled: true
+  # Suppress / downgrade BUY signals when credit is in the STRESS band AND
+  # still widening AND the index is in a deep structural drawdown. This is the
+  # zone where "VIX 35, credit not frozen YET" historically kept falling (2008).
+  drawdown_pct: 20.0
+  require_oas_rising: true
+
+# -----------------------------------------------------------------------------
+# Cash deployment tranches (only emitted when the credit gate is OPEN)
+# -----------------------------------------------------------------------------
+deployment:
+  tranche_1_pct: 30      # at first confirmed entry (VIX tense)
+  tranche_2_pct: 30      # VIX panic (>= panic_low)
+  tranche_3_pct: 40      # VIX breaks blowoff OR falls from peak
+  peak_drop_pts: 5       # VIX "falling from peak" = down this many points off high
+
+# -----------------------------------------------------------------------------
+# Output
+# -----------------------------------------------------------------------------
+output:
+  reports_dir: "reports"
+  write_json: true
