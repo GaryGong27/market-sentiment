@@ -62,9 +62,15 @@ def to_terminal(result: dict, warnings: List[str]) -> str:
              f"(IG {_f(s.get('ig_oas'),' bps',0)}, 30d chg "
              f"{_f(credit.get('oas_change_bps'),' bps',0)})  -> {credit['state'].upper()}")
     L.append(f"    Index DD       {_f(s.get('drawdown'),'%')}  (from {s.get('asof',{}).get('SPY','?')} trailing high)")
-    L.append(f"    Breadth        RSP/SPY {_f(s.get('rsp_spy_change'),'%')}  "
-             f"IWM/SPY {_f(s.get('iwm_spy_change'),'%')}  "
-             f"narrow={s.get('breadth_narrow')}")
+    L.append(f"    Breadth        narrow={s.get('breadth_narrow')}")
+    for axis, name in (("rsp_spy", "RSP/SPY"), ("iwm_spy", "IWM/SPY")):
+        bh = s.get(f"{axis}_below_high_pct")
+        bh_txt = f"{_f(bh,'%')} below 252d-high" if bh is not None else "n/a vs high"
+        L.append(f"      {name}      20d {_f(s.get(axis + '_change'),'%')}  "
+                 f"126d {_f(s.get(axis + '_change_long'),'%')}  {bh_txt}")
+    nr = s.get("breadth_narrow_reasons") or []
+    if nr:
+        L.append(f"      -> {'; '.join(nr)}")
     L.append(f"    Cross-asset    10Y {_f(s.get('y10'),'%',2)} (chg {_f(s.get('y10_change_bps'),'bps',0)})  "
              f"real {_f(s.get('real_yield'),'%',2)}  DXY {_f(s.get('dxy_change'),'%')}  "
              f"Gold {_f(s.get('gold_change'),'%')}")

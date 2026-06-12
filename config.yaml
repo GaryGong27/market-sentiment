@@ -55,9 +55,17 @@ fear_greed:
 # Market breadth (metric 3) - coarse ETF-ratio proxies + optional NYSE H/L
 # -----------------------------------------------------------------------------
 breadth:
-  ratio_window: 20       # lookback (trading days) for RSP/SPY & IWM/SPY trend
-  # Underperformance flagged only if the ratio falls more than this over window.
-  divergence_pct: 1.5    # e.g. RSP/SPY down >1.5% over 20d = narrowing leadership
+  ratio_window: 20       # short lookback (trading days) for RSP/SPY & IWM/SPY trend
+  # A short window alone is base-effect prone: a bounce off an annual low reads
+  # as "broadening" even while leadership is structurally narrow. So narrowness
+  # is flagged on ANY of three checks (short trend, long trend, level-vs-high).
+  ratio_window_long: 126 # ~6-month trend: catches structural (not 1-month) narrowing
+  # Underperformance flagged if a ratio falls more than this over EITHER window.
+  divergence_pct: 1.5    # e.g. RSP/SPY down >1.5% over the window = narrowing leadership
+  # Level check (concentration depth, direction-agnostic): flag if a ratio sits
+  # more than this % below its trailing high, regardless of the recent trend.
+  high_window: 252       # trailing window for the ratio's high
+  below_high_pct: 5.0    # ratio >5% below its 252d high = structurally narrow
 
 # -----------------------------------------------------------------------------
 # Credit market (metric 4) - THE MASTER GATE. OAS is primary, ETFs secondary.

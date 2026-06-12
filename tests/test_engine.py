@@ -130,6 +130,56 @@ dep = engine._deployment(sig(vix=40), credit("systemic", False),
                          {"code": "S4"}, breaker(), CFG)
 check("gate closed -> 0%", dep["recommended_pct"], 0)
 
+# --- breadth: short + long trend + structural level-vs-high --------------
+print("breadth")
+
+
+def _series(vals):
+    return [(f"d{i:04d}", float(v)) for i, v in enumerate(vals)]
+
+
+# IWM held flat (ratio constant) so RSP drives every case in isolation.
+_FLAT_SPY = _series([100.0] * 300)
+_FLAT_IWM = _series([50.0] * 300)
+
+
+def _breadth(rsp_vals):
+    return engine._breadth(
+        {"SPY": _FLAT_SPY, "IWM": _FLAT_IWM, "RSP": _series(rsp_vals)}, CFG)
+
+
+# Broadening: RSP/SPY rising into its high -> not narrow on any check.
+b = _breadth([100 + i * 0.1 for i in range(300)])
+check("steady broadening -> not narrow", b["breadth_narrow"], False)
+
+# Short-window narrowing: flat then a sharp 20d drop.
+b = _breadth([100.0] * 280 + [97.0] * 20)
+check("short-window drop -> narrow", b["breadth_narrow"], True)
+
+# Structural narrowness hidden by a short bounce: ratio peaks at 120, decays to
+# ~104, then bounces to 110 over the last 20d. Old short-only logic (20d > 0)
+# would call this NOT narrow; the long window + level-vs-high catch it.
+_struct = []
+for i in range(300):
+    if i < 50:
+        v = 100.0
+    elif i < 150:
+        v = 100.0 + (i - 50) * 0.2          # ramp 100 -> 120
+    elif i < 200:
+        v = 120.0                            # plateau at the annual high
+    elif i < 280:
+        v = 120.0 - (i - 200) * 0.2          # decay 120 -> ~104
+    else:
+        v = 104.0 + (i - 279) * 0.3          # bounce -> 110
+    _struct.append(v)
+b = _breadth(_struct)
+check("structural narrow despite 20d bounce -> narrow", b["breadth_narrow"], True)
+check("  ...and the 20d trend really is positive (the trap)",
+      b["rsp_spy_change"] > 0, True)
+check("  ...flagged via long-window or level-vs-high, not short",
+      any("126d" in r or "below" in r for r in b["breadth_narrow_reasons"]), True)
+
+
 # --- summary -------------------------------------------------------------
 fails = [r for r in _results if not r[1]]
 print(f"\n{len(_results)-len(fails)}/{len(_results)} passed")

@@ -91,17 +91,8 @@ def _compute_signals(data: Dict[str, Series], cfg: dict) -> dict:
     dd_sym = cfg["drawdown"]["index_symbol"]
     s["drawdown"] = ind.drawdown_from_high(data.get(dd_sym, spy), cfg["drawdown"]["high_window"])
 
-    # --- Breadth (coarse ETF-ratio proxies) ---
-    rsp_spy = _ratio(data.get("RSP"), data.get("SPY"))
-    iwm_spy = _ratio(data.get("IWM"), data.get("SPY"))
-    bwin = cfg["breadth"]["ratio_window"]
-    s["rsp_spy_change"] = ind.pct_change_over(rsp_spy, bwin) if rsp_spy else None
-    s["iwm_spy_change"] = ind.pct_change_over(iwm_spy, bwin) if iwm_spy else None
-    div = cfg["breadth"]["divergence_pct"]
-    s["breadth_narrow"] = bool(
-        (s["rsp_spy_change"] is not None and s["rsp_spy_change"] < -div)
-        or (s["iwm_spy_change"] is not None and s["iwm_spy_change"] < -div)
-    )
+    # --- Breadth (coarse ETF-ratio proxies, short trend + structural) ---
+    s.update(_breadth(data, cfg))
 
     # --- Cross-asset ---
     mwin = cfg["cross_asset"]["move_window"]
@@ -127,6 +118,45 @@ def _ratio(a: Optional[Series], b: Optional[Series]) -> Optional[Series]:
     bd = dict(b)
     out: Series = [(d, v / bd[d]) for d, v in a if d in bd and bd[d]]
     return out or None
+
+
+def _breadth(data: Dict[str, Series], cfg: dict) -> dict:
+    """Breadth signals from coarse ETF ratios (RSP/SPY = equal- vs cap-weight,
+    IWM/SPY = small- vs cap-weight).
+
+    A short 20d trend alone is base-effect prone: a bounce off an annual low
+    prints positive even while leadership is structurally narrow. So narrowness
+    is flagged on ANY of three checks per ratio:
+      * short-window trend  < -divergence_pct
+      * long-window  trend  < -divergence_pct   (catches a multi-month bleed)
+      * level sitting       > below_high_pct below its trailing high (depth)
+    """
+    b = cfg["breadth"]
+    swin = b["ratio_window"]
+    lwin = b.get("ratio_window_long")
+    hwin = b.get("high_window", 252)
+    div = b["divergence_pct"]
+    below = b.get("below_high_pct")
+    out: dict = {}
+    reasons: List[str] = []
+    for label, num in (("rsp_spy", data.get("RSP")), ("iwm_spy", data.get("IWM"))):
+        r = _ratio(num, data.get("SPY"))
+        short = ind.pct_change_over(r, swin) if r else None
+        long_ = ind.pct_change_over(r, lwin) if (r and lwin) else None
+        dd_high = ind.drawdown_from_high(r, hwin) if r else None  # <=0 (% below high)
+        below_high = -dd_high if dd_high is not None else None
+        out[f"{label}_change"] = short
+        out[f"{label}_change_long"] = long_
+        out[f"{label}_below_high_pct"] = _round(below_high, 1) if below_high is not None else None
+        if short is not None and short < -div:
+            reasons.append(f"{label} {swin}d {short:.1f}% < -{div}%")
+        if long_ is not None and long_ < -div:
+            reasons.append(f"{label} {lwin}d {long_:.1f}% < -{div}%")
+        if below is not None and below_high is not None and below_high > below:
+            reasons.append(f"{label} {below_high:.1f}% below {hwin}d high")
+    out["breadth_narrow"] = bool(reasons)
+    out["breadth_narrow_reasons"] = reasons
+    return out
 
 
 # ---------------------------------------------------------------------------
